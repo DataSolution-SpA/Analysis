@@ -1,0 +1,124 @@
+###
+# Proyecto:     Veterinaria
+# Autor:        Alfredo Aranda Nunez
+# Descripcion:  Extraccion de puntos de interes para un radio de 500m
+# Direccin git: https://github.com/DataSolution-SpA/Proyectos/tree/main/Veterinaria
+###
+
+### Extraccion de informacion desde la API de google_places
+# Latitud es Y / Longitd es X
+library(readr)
+library(data.table)
+grid_c_500_mz_gran_stgo <- read_csv("C:/Users/alfre/Google Drive/Inteligencia Financiera/Inversiones Tecnologicas y Analiticas SpA/Proyectos/7-Veterinaria/grilla santiago/grid_c_1000_mz_gran_stgo.csv")
+
+# All google places
+#place_type_google <- c("airport","bakery","bank","bar","beauty_salon","book_store","bus_station","cafe","casino","clothing_store","convenience_store",
+#                       "dentist","department_store","doctor","electronics_store","funeral_home","furniture_store","gas_station","grocery_or_supermarket","gym",
+#                       "hair_care","home_goods_store","hospital","insurance_agency","jewelry_store","lawyer","lodging","meal_delivery",
+#                       "meal_takeaway","movie_theater","night_club","park","parking","pet_store","pharmacy","restaurant","school","shoe_store","shopping_mall","stadium",
+#                       "store","subway_station","university","church","courthouse")
+
+place_type_google <- c("bank","dentist","grocery_or_supermarket","gym",
+                       "hair_care","pet_store","pharmacy","restaurant","school","shopping_mall",
+                       "store","veterinary_care")
+
+place_type_google <- c("pet_store","veterinary_care")
+
+
+
+# Se define el largo del data frame places para evaluar cada componente en la funcion de extraccion 
+len_place_type_google <- length(place_type_google)
+
+# Se define el largo de grilla para evaluar cada coordenada y realizar su extraccion
+len_grilla<- length(grid_c_500_mz_gran_stgo$x)
+
+# Carga las liberias de la API de google_place
+library(googleway) #sudo yum install jq-devel / sudo yum install libjpeg-turbo-devel 
+
+# Key para la extraccion (el documento, archivo excel "extraccion" estÃ¡n todas las keys utilizadas)
+key <- "tukey"
+
+# Se debe defenir el data frame que serÃ¡ llenado con todos los comercios en un radio de 500m
+revision <- subset(grid_c_500_mz_gran_stgo, id == 12809) # se toma un punto aleatorio
+
+
+# Esta funcion es la que define la extraccion (doc_extraccion_puntos_google contiene el detalle de la extraccion)
+df_places <- google_places(location = c(revision$y[1], revision$x[1]),
+                           place_type = c("veterinary_care"),
+                           radius = 22000,
+                           open_now = NULL,
+                           key = key)
+
+
+# Construccion de data frame que extrae latitud, longitud, id, place_id y referencia de todos los puntos extraidos
+df_places_results <- as.data.frame(cbind(df_places$results$geometry$location$lat, 
+                                         df_places$results$geometry$location$lng,
+                                         df_places$results$place_id,
+                                         df_places$results$reference,
+                                         df_places$results$rating,
+                                         df_places$results$vicinity,
+                                         df_places$results$name,
+                                         df_places$results$user_ratings_total))
+colnames(df_places_results) <- c("lat","lng","place_id","reference","rating", "vicinity", "name","user_ratings_total")
+
+# La siguiente iteracion realiza todas las consultas a la API de google de la siguiente manera:
+#1) Se toma cada punto a iterar, como se permite un maximo de 10000 consultas mensuales. Si son 45 places, entonces podemos hacer (Cuota/N° places) 10.000/45 = 222 consultas mensuales por cuenta
+#2) Para cada punto, se realiza la extraccion de cada uno de los places seleccionados
+
+puntos <- grid_c_500_mz_gran_stgo[c("x","y","id")]
+df_places_general_results  <- as.data.frame(cbind(df_places_results[0,],puntos[0,])) # se deja en 0 el data drame construido (aqui se guarda el resultado final)
+contador <- 0 # Va contando la cantidad de consultas en google, independiente de si tiene o no comercios en su entorno
+llenador <- 1
+cuota_mensual <- 25000
+consultas <- cuota_mensual/len_place_type_google
+
+    for(ite_coor in 1:len_grilla){
+      for(ite_place in 1:len_place_type_google){ # Toma cada place previamente definida
+        # En ocasiones, existe un error de conexion 
+        tryCatch({ #Al efecutar consultas, en ocasiones se cae, por lo que se ejecuta el tryCatch para continuar con la iteracion pese al error.
+          df_places <- google_places(location = c(grid_c_500_mz_gran_stgo$y[ite_coor], grid_c_500_mz_gran_stgo$x[ite_coor]),
+                                     place_type = place_type_google[ite_place],
+                                     radius = 750,
+                                     open_now = NULL,
+                                     key = key)
+          contador <- contador + 1 # Cuenta cada consulta realizada a la API
+          
+          if (is.null(df_places$results$place_id)){}
+          
+          else{
+            # Construccion de data frame que define latitud, longitud, id, place_id y referencia a partir del resultado obetnido de la funcion google_places()
+            if(is.null(df_places$results$rating)){df_places$results$rating<-NA} 
+            if(is.null(df_places$results$vicinity)){df_places$results$vicinity<-NA} 
+            if(is.null(df_places$results$name)){df_places$results$name<-NA} 
+            if(is.null(df_places$results$user_ratings_total)){df_places$results$user_ratings_total<-NA} 
+            
+            df_places_results <- as.data.frame(cbind(df_places$results$geometry$location$lat, 
+                                                     df_places$results$geometry$location$lng,
+                                                     df_places$results$place_id,
+                                                     df_places$results$reference,
+                                                     df_places$results$rating,
+                                                     df_places$results$vicinity,
+                                                     df_places$results$name,
+                                                     df_places$results$user_ratings_total))
+            colnames(df_places_results) <- c("lat","lng","place_id","reference", "rating","vicinity","name","user_ratings_total")
+            
+            df_places_results$Comercio <- place_type_google[ite_place]
+            df_places_results$iterador <- ite_coor
+            df_places_results$id <- grid_c_500_mz_gran_stgo$id[ite_coor]
+            df_places_results$x <- grid_c_500_mz_gran_stgo$x[ite_coor]
+            df_places_results$y <- grid_c_500_mz_gran_stgo$y[ite_coor]
+            # Agregacion de columnas con detalle puntos  y tipo de comercio
+            df_places_general_results <- rbind(df_places_results,df_places_general_results) #mezcla el resultado obtenido de la funcion google_places() con la informacion inmobiliaria
+            df_places_results <- df_places_results[0,]}
+            #print("ok")
+
+        }, error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+        Sys.sleep(0.5)
+      }
+      if(contador > 22900){stop("muchas llamadas")}
+      #print(contador)
+      
+    }
+
+saveRDS(df_places_general_results,"C:/Users/alfre/Google Drive/Inteligencia Financiera/Inversiones Tecnologicas y Analiticas SpA/Proyectos/7-Veterinaria/grilla santiago/df_places_general_results.rds")
+write.csv(df_places_general_results,"C:/Users/alfre/Google Drive/Inteligencia Financiera/Inversiones Tecnologicas y Analiticas SpA/Proyectos/7-Veterinaria/grilla santiago/comercios.csv")
